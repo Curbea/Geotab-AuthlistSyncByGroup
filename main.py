@@ -53,17 +53,19 @@ def create_table(conn, group_id):
     except sqlite3.Error as e:
         logging.error(f"Error creating table for group {group_id}: {e}")
 
+
 def insert_keys(conn, group_id, keys):
     new_keys = []
     try:
-        c = conn.cursor()
-        for key in keys:
-            c.execute(f'''
-                INSERT OR IGNORE INTO keys_{group_id} (serialNumber) VALUES (?)
-            ''', (key,))
-            if c.rowcount > 0:
-                new_keys.append(key)
-        conn.commit()
+        with conn:
+            c = conn.cursor()
+            for key in keys:
+                c.execute(f'''
+                    INSERT OR IGNORE INTO keys_{group_id} (serialNumber) VALUES (?)
+                ''', (key,))
+                if c.rowcount > 0:
+                    new_keys.append(key)
+        logging.info(f"Keys inserted for group {group_id}: {new_keys}")
         return new_keys
     except sqlite3.Error as e:
         logging.error(f"Error inserting keys for group {group_id}: {e}")
@@ -72,22 +74,31 @@ def insert_keys(conn, group_id, keys):
 def remove_unused_keys(conn, group_id, keys):
     try:
         c = conn.cursor()
+        placeholders = ','.join('?' for _ in keys)
         query = f'''
-            DELETE FROM keys_{group_id} WHERE serialNumber NOT IN ({','.join('?' for _ in keys)})
+            DELETE FROM keys_{group_id} WHERE serialNumber NOT IN ({placeholders})
+            RETURNING serialNumber
         '''
         c.execute(query, keys)
+        removed_keys = c.fetchall()
         conn.commit()
-        return [key for key in keys if key not in c.fetchall()]
+        
+        if removed_keys:
+            removed_keys_list = [key[0] for key in removed_keys]
+            logging.info(f"Keys removed for group {group_id}: {removed_keys_list}")
+        
+        return removed_keys_list
     except sqlite3.Error as e:
         logging.error(f"Error removing unused keys for group {group_id}: {e}")
         return []
+        
         
 
 
 ####Drivers######################################################################################################################################################################################################################################################
 #This section is to get all drivers by group, return their nfc key, compare it with the database, and either add or remove them from the database, and then in turn, the authlist
 
-def get_users_with_nfc_keys(api, group_id, db_file):
+def get_users_with_nfc_keys(api, group_id, conn):
     try:
         # Create table if not exists for the group_id
         create_table(conn, group_id)
