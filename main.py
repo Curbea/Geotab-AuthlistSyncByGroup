@@ -144,7 +144,7 @@ def get_vans_by_group(api, group_id, conn):
                     break
         
         if not filtered_devices:
-            logging.warning(f"No devices with 'Enableauthorizeddriverslist' enabled found in group ID: {group_id}")
+            logging.warning(f"No devices with 'Enable Authorised Driver List' enabled found in group ID: {group_id}")
         
         new_devices, all_keys = insert_devices(conn, group_id, filtered_devices)
         removed_devices = remove_old_devices(conn, group_id, [device['id'] for device in filtered_devices])
