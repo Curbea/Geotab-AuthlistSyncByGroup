@@ -29,7 +29,7 @@ def get_vans_by_group(api, group_id):
 
 ###SQLITE Functions (Memory in between runs) ##################################################################################################################################################
 # We will be storing all keys in a table labeled keys_group id for comparison later, we need to keep a list of who we've added so we know what to remove in the future. There is a 1000 key limit on the iox device and we cannot retrieve this from the device itself. 
-# It also wouldnt make sense to enable this feature and not do this.
+# It also wouldn't make sense to enable this feature and not do this.
 # Should refactor to use the storage api eventually.
 # Function to create SQLite connection
 
@@ -89,11 +89,6 @@ def remove_unused_keys(conn, group_id, keys):
 
 def get_users_with_nfc_keys(api, group_id, db_file):
     try:
-        # Connect to SQLite database
-        conn = create_connection(db_file)
-        if conn is None:
-            return []
-
         # Create table if not exists for the group_id
         create_table(conn, group_id)
 
@@ -113,12 +108,6 @@ def get_users_with_nfc_keys(api, group_id, db_file):
     except Exception as e:
         logging.error(f"Error fetching users with NFC keys for group {group_id}: {e}")
         return []
-
-def process_group(api, group):
-    group_id = group['id']
-    new_keys, remove_keys = get_users_with_nfc_keys(api, group_id, db_file)
-    devices = get_vans_by_group(api, group_id)
-    return new_keys, remove_keys, devices
 
 ####Update Vehicles
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
@@ -142,6 +131,18 @@ def send_text_message(api, vehicles_to_update, keys, add=True):
     except Exception as e:
         logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}
 
+## Combined Processes 
+
+def process_group(api, group, db_file):
+    group_id = group['id']
+    conn = create_connection(db_file)
+    if conn:
+        new_keys, remove_keys = get_users_with_nfc_keys(api, group_id, conn)
+        devices = get_vans_by_group(api, group_id)
+        conn.close()
+        return new_keys, remove_keys, devices
+    return [], [], []
+
 ####Main Process
 
 def main():
@@ -150,7 +151,6 @@ def main():
         groups = api.get('Group', search=dict(active=True))
         filtered_groups = [group for group in groups if group['name'] in group_names]
         for group in filtered_groups:
-            group_id = group['id']
             remove_keys, new_keys, devices = process_group(api, group, db_file)
             for device in devices:
                 vehicles_to_update = device['id']
