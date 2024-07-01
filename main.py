@@ -63,6 +63,7 @@ def insert_keys(conn, group_id, keys):
         return []
 #Remove Old Keys
 def remove_unused_keys(conn, group_id, keys):
+    removed_keys_list = []
     try:
         c = conn.cursor()
         placeholders = ','.join('?' for _ in keys)
@@ -81,7 +82,7 @@ def remove_unused_keys(conn, group_id, keys):
         return removed_keys_list
     except sqlite3.Error as e:
         logging.error(f"Error removing unused keys for group {group_id}: {e}")
-        return []
+        return removed_keys_list
 
 ##Vehicle Database portion
 
@@ -105,6 +106,7 @@ def insert_devices(conn, group_id, devices):
         return [], []
 
 def remove_old_devices(conn, group_id, current_device_ids):
+    removed_devices=[]
     try:
         c = conn.cursor()
         placeholders = ','.join('?' for _ in current_device_ids)
@@ -120,7 +122,7 @@ def remove_old_devices(conn, group_id, current_device_ids):
             removed_device_list = [device[0] for device in removed_devices]
             logging.info(f"Devices removed for group {group_id}: {removed_device_list}")
         
-        return
+        return removed_devices
     except sqlite3.Error as e:
         logging.error(f"Error removing old devices for group {group_id}: {e}")
         return []
@@ -219,12 +221,11 @@ def process_group(api, group, db_file):
     conn = create_connection(db_file)
     if conn:
         new_keys, remove_keys = get_users_with_nfc_keys(api, group_id, conn)
-        devices, new_devices, all_keys = get_vans_by_group(api, group_id, conn)
+        devices, new_devices, all_keys, removed_devices = get_vans_by_group(api, group_id, conn)
         conn.close()
-        return new_keys, remove_keys, new_devices, all_keys
-    return [], [], [], [], []
+        return new_keys, remove_keys, devices, new_devices, removed_devices, all_keys
+    return [], [], [], [], [], []
 ####Main Process
-
 def main():
     try:
         api.authenticate()
@@ -232,7 +233,7 @@ def main():
         filtered_groups = [group for group in groups if group['name'] in group_names]
         
         for group in filtered_groups:
-            new_keys, remove_keys, devices, new_devices, all_keys = process_group(api, group, db_file)
+            new_keys, remove_keys, devices, new_devices, removed_devices, all_keys = process_group(api, group, db_file)
             
             for device in devices:
                 vehicles_to_update = device['id']
@@ -252,4 +253,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-            
