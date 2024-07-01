@@ -46,7 +46,7 @@ def clear_vans(conn, group_id):
 
 def send_clear_message(api, vehicle_id):
     try:
-        api.call('Add', 'TextMessage', {
+        message_params = {
             "device": {
                 "id": vehicle_id
             },
@@ -57,7 +57,8 @@ def send_clear_message(api, vehicle_id):
                 "clearWhiteList": True,
                 "addToWhiteList": False
             }
-        })
+        }
+        api.call('Add', 'TextMessage', message_params)
         logging.info(f"Clear message sent to vehicle with ID: {vehicle_id}")
     except Exception as e:
         logging.error(f"Error sending clear message to vehicle with ID: {vehicle_id}: {e}")
