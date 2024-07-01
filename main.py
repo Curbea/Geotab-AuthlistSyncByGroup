@@ -1,7 +1,7 @@
 from mygeotab import API,dates
 from dotenv import load_dotenv
 import os
-import json
+import logging
 import sqlite3
 # Load environment variables from .env file
 load_dotenv()
@@ -129,7 +129,7 @@ def send_text_message(api, vehicles_to_update, keys, add=True):
         action = "added to" if add else "removed from"
         logging.info(f"Keys {action} vehicle with ID: {vehicles_to_update}")
     except Exception as e:
-        logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}
+        logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}")
 
 ## Combined Processes 
 
