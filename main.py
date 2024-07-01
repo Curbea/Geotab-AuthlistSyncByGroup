@@ -196,24 +196,28 @@ def get_all_keys(conn, group_id):
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
 
 def send_text_message(api, vehicles_to_update, keys, add=True):
+    key_object = [key.to_dict() for key in keys]
     try:
-        api.call('Add', 'TextMessage', {
-            "device": {
-                "id": vehicles_to_update
-            },
-            "isDirectionToVehicle": True,
-            "messageContent": {
-                "driverKey": keys,
-                "contentType": "DriverWhiteList",
-                "clearWhiteList": False,
-                "addToWhiteList": add
-            }
-        })
+        api.add({
+            'typeName': 'TextMessage',
+            'entity': {
+                'device': {
+                    'id': vehicle_to_update
+        },
+        isDirectionToVehicle: true,
+        messageContent: {
+          driverKey: key_object
+          contentType: 'DriverAuthList',
+          clearAuthList: true,
+          addToAuthList: false
+        }
+      }
         action = "added to" if add else "removed from"
         logging.info(f"Keys {action} vehicle with ID: {vehicles_to_update}")
+        logging.debug(f"Server response: {response}")
     except Exception as e:
         logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}")
-
+        print (key_object)
 ## Combined Processes 
 
 def process_group(api, group, db_file):
