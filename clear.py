@@ -44,24 +44,23 @@ def clear_vans(conn, group_id):
     except sqlite3.Error as e:
         logging.error(f"Error clearing vans for group {group_id}: {e}")
 
-def send_clear_message(api, vehicle_id):
+def send_text_message(api, vehicle_id):
     try:
-        message_params = {
+        api.call('Add', 'TextMessage', {
             "device": {
-                "id": vehicle_id
+                "id": vehicles_to_update
             },
             "isDirectionToVehicle": True,
             "messageContent": {
                 "driverKey": "",
-                "contentType": "DriverWhiteList",
+                "contentType": "DriverAuthList",
                 "clearWhiteList": True,
                 "addToWhiteList": False
             }
-        }
-        api.call('Add', 'TextMessage', message_params)
-        logging.info(f"Clear message sent to vehicle with ID: {vehicle_id}")
+        })
+        logging.info(f"Keys cleared from vehicle with ID: {vehicle_id}")
     except Exception as e:
-        logging.error(f"Error sending clear message to vehicle with ID: {vehicle_id}: {e}")
+        logging.error(f"Error sending text message to vehicle with ID: {vehicle_id}")
 
 def clear_group(api, group, db_file):
     group_id = group['id']
