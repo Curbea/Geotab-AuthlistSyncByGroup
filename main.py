@@ -142,6 +142,7 @@ def send_text_message(api, vehicles_to_update, keys, add=True):
     except Exception as e:
         logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}
 
+####Main Process
 
 def main():
     try:
