@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import os
 import logging
 import sqlite3
+#import json
 # Load environment variables from .env file
 load_dotenv()
 
@@ -52,8 +53,9 @@ def insert_keys(conn, group_id, keys):
             c = conn.cursor()
             for key in keys:
                 c.execute(f'''
-                    INSERT OR IGNORE INTO keys_{group_id} (serialNumber) VALUES (?)
-                ''', (key,))
+                    INSERT OR IGNORE INTO keys_{group_id} (driverKeyType, id, keyId, serialNumber) 
+                    VALUES (?, ?, ?, ?)
+                ''', (key['driverKeyType'], key['id'], key['keyId'], key['serialNumber']))
                 if c.rowcount > 0:
                     new_keys.append(key)
         logging.info(f"Keys inserted for group {group_id}: {new_keys}")
@@ -69,21 +71,20 @@ def remove_unused_keys(conn, group_id, keys):
         placeholders = ','.join('?' for _ in keys)
         query = f'''
             DELETE FROM keys_{group_id} WHERE serialNumber NOT IN ({placeholders})
-            RETURNING serialNumber
+            RETURNING driverKeyType, id, keyId, serialNumber
         '''
-        c.execute(query, keys)
+        c.execute(query, [key['serialNumber'] for key in keys])
         removed_keys = c.fetchall()
         conn.commit()
         
         if removed_keys:
-            removed_keys_list = [key[0] for key in removed_keys]
+            removed_keys_list = [{'driverKeyType': key[0], 'id': key[1], 'keyId': key[2], 'serialNumber': key[3]} for key in removed_keys]
             logging.info(f"Keys removed for group {group_id}: {removed_keys_list}")
         
         return removed_keys_list
     except sqlite3.Error as e:
         logging.error(f"Error removing unused keys for group {group_id}: {e}")
         return removed_keys_list
-
 ##Vehicle Database portion
 
 def insert_devices(conn, group_id, devices):
@@ -126,8 +127,11 @@ def remove_old_devices(conn, group_id, current_device_ids):
     except sqlite3.Error as e:
         logging.error(f"Error removing old devices for group {group_id}: {e}")
         return []
+
+
 ###Get Vehicles#############################################################################################################################################################################
-#This section is to get all vehicles in group that have the authorized driver list enabled, return their nfc key, compare it with the database, and either add or remove them from the database, and then in turn, the authlist
+#This section is to get all vehicles in group that have the authorized driver list enabled, return their nfc key, compare it with the database, and either add or remove them from the database, 
+#and then in turn, the authlist
 
 def get_vans_by_group(api, group_id, conn):
     try:
@@ -153,14 +157,14 @@ def get_vans_by_group(api, group_id, conn):
     except Exception as e:
         logging.error(f"Error fetching devices for group {group_id}: {e}")
         return [], [], [], []
-
 ####Get Drivers###########################################################################################################################################################################
 #This section is to get all drivers by group, return their nfc key, compare it with the database, and either add or remove them from the database, and then in turn, the authlist
 
 def get_users_with_nfc_keys(api, group_id, conn):
     try:
         # Create table if not exists for the group_id
-        create_table(conn, f"keys_{group_id}", "serialNumber TEXT PRIMARY KEY")
+        create_table(conn, f"keys_{group_id}", 
+                     "driverKeyType TEXT, id TEXT, keyId TEXT, serialNumber TEXT PRIMARY KEY")
 
         # Fetch users and their keys
         users = api.get('User', search={'driverGroups': [{'id': group_id}]})
@@ -168,8 +172,13 @@ def get_users_with_nfc_keys(api, group_id, conn):
         for user in users:
             if 'keys' in user:
                 for key in user['keys']:
-                    nfc_keys.append(key['serialNumber'])
-
+                    key_data = {
+                        'driverKeyType': key.get('driverKeyType'),
+                        'id': key.get('id'),
+                        'keyId': key.get('keyId'),
+                        'serialNumber': key.get('serialNumber')
+                    }
+                    nfc_keys.append(key_data)
         # Get new keys inserted and removed from the database
         new_keys = insert_keys(conn, group_id, nfc_keys)
         remove_keys = remove_unused_keys(conn, group_id, nfc_keys)
@@ -184,8 +193,8 @@ def get_users_with_nfc_keys(api, group_id, conn):
 def get_all_keys(conn, group_id):
     try:
         c = conn.cursor()
-        c.execute(f"SELECT serialNumber FROM keys_{group_id}")
-        all_keys = [row[0] for row in c.fetchall()]
+        c.execute(f"SELECT driverKeyType, id, keyId, serialNumber FROM keys_{group_id}")
+        all_keys = [{'driverKeyType': row[0], 'id': row[1], 'keyId': row[2], 'serialNumber': row[3]} for row in c.fetchall()]
         logging.info(f"All keys for group {group_id}: {all_keys}")
         return all_keys
     except sqlite3.Error as e:
@@ -195,30 +204,27 @@ def get_all_keys(conn, group_id):
 ####Update Vehicles
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
 
-def send_text_message(api, vehicles_to_update, keys, add=True):
-    key_object = [key.to_dict() for key in keys]
-    try:
-        api.add({
-            'typeName': 'TextMessage',
-            'entity': {
-                'device': {
-                    'id': vehicle_to_update
-        },
-        isDirectionToVehicle: true,
-        messageContent: {
-          driverKey: key_object
-          contentType: 'DriverAuthList',
-          clearAuthList: true,
-          addToAuthList: false
-        }
-      }
+#def send_text_message(api, vehicles_to_update, all_keys, add=True):
+def send_text_message(api, vehicles_to_update, Keys, add=True):
+       try:
+        data = {
+    "device": {
+        "id": "b1B5"
+    },
+    "isDirectionToVehicle": True,
+    "messageContent": {
+        "driverKey": Keys,
+        "contentType": "DriverAuthList",
+        "clearAuthList": False,
+        "addToAuthList": True
+    }
+}
+
+        api.add("TextMessage",data)
         action = "added to" if add else "removed from"
         logging.info(f"Keys {action} vehicle with ID: {vehicles_to_update}")
-        logging.debug(f"Server response: {response}")
-    except Exception as e:
-        logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}")
-        print (key_object)
-## Combined Processes 
+       except Exception as e:
+        logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}: {e}")
 
 def process_group(api, group, db_file):
     group_id = group['id']
@@ -244,12 +250,18 @@ def main():
                 logging.info(f"Device {device['name']} found in group {group['name']} with ID: {device['id']}")
                 
                 if device['id'] in new_devices:
+                    Keys= all_keys
+                    print (Keys)
                     logging.info(f"New device {device['name']} (ID: {device['id']}) found. Adding all keys to whitelist.")
                     send_text_message(api, vehicles_to_update, all_keys, add=True)
                 else:
                     if new_keys:
+                        Keys= new_keys
+                        print (Keys)
                         send_text_message(api, vehicles_to_update, new_keys, add=True)
                     if remove_keys:
+                        Keys= remove_keys
+                        print (Keys)
                         send_text_message(api, vehicles_to_update, remove_keys, add=False)
             
     except Exception as e:
