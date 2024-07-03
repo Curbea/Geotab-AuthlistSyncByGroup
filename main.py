@@ -138,13 +138,16 @@ def get_vans_by_group(api, group_id, conn):
     try:
         create_table(conn, f"devices_{group_id}", "deviceId TEXT PRIMARY KEY, name TEXT")
         logging.info(f"Fetching devices for group ID: {group_id}")
+        now_utc = datetime.now(timezone.utc)
+#  devices = api.get('Device', search={'groups': [{'id': group_id}], "fromDate": now_utc}) # For later
+
         devices = api.get('Device', search={'groups': [{'id': group_id}]})
         
         filtered_devices = []
         for device in devices:
             custom_parameters = device.get('customParameters', [])
             for param in custom_parameters:
-                if param.get('description') == "Enable Authorised Driver List" and param.get('isEnabled'):
+                if param.get('description') == "Enable Authorised Driver List":
                     filtered_devices.append(device)
                     break
         
