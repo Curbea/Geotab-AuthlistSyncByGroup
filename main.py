@@ -1,8 +1,9 @@
-from mygeotab import API,dates
+from mygeotab import API
 from dotenv import load_dotenv
 import os
 import logging
 import sqlite3
+from datetime import datetime,timezone
 #import json
 # Load environment variables from .env file
 load_dotenv()
@@ -165,9 +166,10 @@ def get_users_with_nfc_keys(api, group_id, conn):
         # Create table if not exists for the group_id
         create_table(conn, f"keys_{group_id}", 
                      "driverKeyType TEXT, id TEXT, keyId TEXT, serialNumber TEXT PRIMARY KEY")
-
+        #We only want active Drivers 
+        now_utc = datetime.now(timezone.utc)
         # Fetch users and their keys
-        users = api.get('User', search={'driverGroups': [{'id': group_id}]})
+        users = api.get('User', search={'driverGroups': [{'id': group_id}], "fromDate": now_utc })
         nfc_keys = []
         for user in users:
             if 'keys' in user:
