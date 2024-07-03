@@ -207,31 +207,36 @@ def get_all_keys(conn, group_id):
 #def send_text_message(api, vehicles_to_update, all_keys, add=True):
 def send_text_message(api, vehicles_to_update, Keys, add=True):
        try:
-        data = {
+          logging.info(f"Keys {Keys}")
+          for key in Keys:
+               logging.info(f"Key {key}")
+               data = {
+
     "device": {
         "id": "b1B5"
     },
     "isDirectionToVehicle": True,
     "messageContent": {
-        "driverKey": Keys,
+        "driverKey": key,
         "contentType": "DriverAuthList",
         "clearAuthList": False,
         "addToAuthList": True
     }
 }
 
-        api.add("TextMessage",data)
-        action = "added to" if add else "removed from"
-        logging.info(f"Keys {action} vehicle with ID: {vehicles_to_update}")
+               api.add("TextMessage",data)
+               action = "added to" if add else "removed from"
+               logging.info(f"Keys {action} vehicle with ID: {vehicles_to_update}")
        except Exception as e:
-        logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}: {e}")
+           logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}: {e}")
 
 def process_group(api, group, db_file):
     group_id = group['id']
     conn = create_connection(db_file)
     if conn:
         new_keys, remove_keys = get_users_with_nfc_keys(api, group_id, conn)
-        devices, new_devices, all_keys, removed_devices = get_vans_by_group(api, group_id, conn)
+        devices, new_devices, removed_devices, all_keys = get_vans_by_group(api, group_id, conn)
+#        all_keys = get_all_keys(conn, group_id)  # Ensure all_keys is fetched after device insertion
         conn.close()
         return new_keys, remove_keys, devices, new_devices, removed_devices, all_keys
     return [], [], [], [], [], []
@@ -250,18 +255,13 @@ def main():
                 logging.info(f"Device {device['name']} found in group {group['name']} with ID: {device['id']}")
                 
                 if device['id'] in new_devices:
-                    Keys= all_keys
-                    print (Keys)
+                    logging.info(f"{all_keys}")
                     logging.info(f"New device {device['name']} (ID: {device['id']}) found. Adding all keys to whitelist.")
                     send_text_message(api, vehicles_to_update, all_keys, add=True)
                 else:
                     if new_keys:
-                        Keys= new_keys
-                        print (Keys)
                         send_text_message(api, vehicles_to_update, new_keys, add=True)
                     if remove_keys:
-                        Keys= remove_keys
-                        print (Keys)
                         send_text_message(api, vehicles_to_update, remove_keys, add=False)
             
     except Exception as e:
