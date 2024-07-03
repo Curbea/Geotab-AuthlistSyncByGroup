@@ -1,4 +1,4 @@
-Working, not efficiently
+WIP
 
 This functions to set the Authorized Drivers List and sync it to all drivers in the same group as the vehicle
 
