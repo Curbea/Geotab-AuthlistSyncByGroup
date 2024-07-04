@@ -13,7 +13,32 @@ def search_texts_authlistcontent(api):
         texts = api.get('TextMessage', search={"fromDate": now_utc}) # Can't seem to combine search with messagecontent or device id
         driver_auth_texts = [text for text in texts if text.get('messageContent', {}).get('contentType') == "DriverAuthList"] # to do find message delivery faliure and add.
 
-        logging.info(f"Users: {json.dumps(driver_auth_texts, default=str)}")  # Correct logging usage
+        logging.info(f"Users: {json.dumps(driver_auth_texts, default=str)}")
         return driver_auth_texts
+###We should just be able to pass faliures directly below
+def send_text_message(api, vehicles_to_update, Keys, add=True):
+       try:
+          logging.info(f"Keys {Keys}")
+          for key in Keys:
+               logging.info(f"Key {key}")
+               data = {
 
+    "device": {
+        "id": "b1B5"
+    },
+    "isDirectionToVehicle": True,
+    "messageContent": {
+        "driverKey": key,
+        "contentType": "DriverAuthList",
+        "clearAuthList": False,
+        "addToAuthList": True
+    }
+}
 
+               api.add("TextMessage",data)
+               action = "added to" if add else "removed from"
+               logging.info(f"Keys {action} vehicle with ID: {vehicles_to_update}")
+       except Exception as e:
+           logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}: {e}")
+#For loop over driver auth texts
+#Maybe check after like an hour if the vehicle should be driving? (recieving messages)
