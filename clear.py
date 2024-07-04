@@ -11,7 +11,9 @@ load_dotenv()
 username = os.getenv('GEOTAB_USERNAME')
 password = os.getenv('GEOTAB_PASSWORD')
 database = os.getenv('GEOTAB_DATABASE')
-group_names = os.getenv('GEOTAB_GROUPS', '').split(',')
+group_names = os.getenv('CLEAR_GEOTAB_GROUPS', '').split(',')
+vehicle_names = os.getenv('CLEAR_GEOTAB_VEHICLES', '').split(',')
+
 db_file = 'authlist.db'
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -45,19 +47,16 @@ def clear_vans(conn, group_id):
         logging.error(f"Error clearing vans for group {group_id}: {e}")
 
 def send_text_message(api, vehicle_id):
-    try:
-        api.call('Add', 'TextMessage', {
-            "device": {
-                "id": vehicles_to_update
-            },
-            "isDirectionToVehicle": True,
-            "messageContent": {
-                "driverKey": "",
-                "contentType": "DriverAuthList",
-                "clearWhiteList": True,
-                "addToWhiteList": False
-            }
-        })
+    "device": {
+        "id": vehicle_id
+    },
+    "isDirectionToVehicle": True,
+    "messageContent": {
+        "driverKey": None,
+        "contentType": "DriverAuthList",
+        "clearAuthList": False,
+        "addToAuthList": True
+    }
         logging.info(f"Keys cleared from vehicle with ID: {vehicle_id}")
     except Exception as e:
         logging.error(f"Error sending text message to vehicle with ID: {vehicle_id}")
