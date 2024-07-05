@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import os
 import logging
 import sqlite3
+from time import sleep
 from datetime import datetime,timezone
 #import json
 # Load environment variables from .env file
@@ -134,14 +135,12 @@ def remove_old_devices(conn, group_id, current_device_ids):
 #This section is to get all vehicles in group that have the authorized driver list enabled, return their nfc key, compare it with the database, and either add or remove them from the database, 
 #and then in turn, the authlist
 
-def get_vans_by_group(api, group_id, conn):
+def get_vans_by_group(api, group_id, conn,add=False):
     try:
         create_table(conn, f"devices_{group_id}", "deviceId TEXT PRIMARY KEY, name TEXT")
         logging.info(f"Fetching devices for group ID: {group_id}")
         now_utc = datetime.now(timezone.utc)
-#  devices = api.get('Device', search={'groups': [{'id': group_id}], "fromDate": now_utc}) # For later
-
-        devices = api.get('Device', search={'groups': [{'id': group_id}]})
+        devices = api.get('Device', search={'groups': [{'id': group_id}], "fromDate": now_utc})
         
         filtered_devices = []
         for device in devices:
@@ -153,14 +152,17 @@ def get_vans_by_group(api, group_id, conn):
         
         if not filtered_devices:
             logging.warning(f"No devices with 'Enable Authorised Driver List' enabled found in group ID: {group_id}")
-        
-        new_devices, all_keys = insert_devices(conn, group_id, filtered_devices)
+
+        if add:
+            new_devices = insert_devices(conn, group_id, filtered_devices)
+            return filtered_devices, new_devices
+
+
         removed_devices = remove_old_devices(conn, group_id, [device['id'] for device in filtered_devices])
-        
-        return filtered_devices, new_devices, removed_devices, all_keys
+        return removed_devices
     except Exception as e:
         logging.error(f"Error fetching devices for group {group_id}: {e}")
-        return [], [], [], []
+        return [], [], []
 ####Get Drivers###########################################################################################################################################################################
 #This section is to get all drivers by group, return their nfc key, compare it with the database, and either add or remove them from the database, and then in turn, the authlist
 
@@ -171,8 +173,10 @@ def get_users_with_nfc_keys(api, group_id, conn):
                      "driverKeyType TEXT, id TEXT, keyId TEXT, serialNumber TEXT PRIMARY KEY")
         #We only want active Drivers 
         now_utc = datetime.now(timezone.utc)
-        # Fetch users and their keys
-        users = api.get('User', search={'driverGroups': [{'id': group_id}], "fromDate": now_utc })
+        users = api.get('User', search={'driverGroups': [{'id': group_id}], "fromDate": now_utc ,"isDriver": True })
+   
+        """Fetch users and their keys - we only want users in the group of the loop (group id), we only want active users, (dateFrom); Is driver, we only need to return users that can or do have keys"""
+
         nfc_keys = []
         for user in users:
             if 'keys' in user:
@@ -187,30 +191,17 @@ def get_users_with_nfc_keys(api, group_id, conn):
         # Get new keys inserted and removed from the database
         new_keys = insert_keys(conn, group_id, nfc_keys)
         remove_keys = remove_unused_keys(conn, group_id, nfc_keys)
-
-        return new_keys, remove_keys
+        all_keys = nfc_keys
+        return new_keys, remove_keys, all_keys
     except Exception as e:
         logging.error(f"Error fetching users with NFC keys for group {group_id}: {e}")
-        return []
-
-
-####We will use below function to ensure all keys are passed along for new vehicles
-def get_all_keys(conn, group_id):
-    try:
-        c = conn.cursor()
-        c.execute(f"SELECT driverKeyType, id, keyId, serialNumber FROM keys_{group_id}")
-        all_keys = [{'driverKeyType': row[0], 'id': row[1], 'keyId': row[2], 'serialNumber': row[3]} for row in c.fetchall()]
-        logging.info(f"All keys for group {group_id}: {all_keys}")
-        return all_keys
-    except sqlite3.Error as e:
-        logging.error(f"Error fetching all keys for group {group_id}: {e}")
         return []
 
 ####Update Vehicles
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
 
 #def send_text_message(api, vehicles_to_update, all_keys, add=True):
-def send_text_message(api, vehicles_to_update, Keys, add=True):
+def send_text_message(api, vehicles_to_update, Keys, add=True,clear=False,Time=0):
        try:
           logging.info(f"Keys {Keys}")
           for key in Keys:
@@ -218,56 +209,78 @@ def send_text_message(api, vehicles_to_update, Keys, add=True):
                data = {
 
     "device": {
-        "id": "b1B5"
+        "id": vehicle_to_update
     },
     "isDirectionToVehicle": True,
     "messageContent": {
-        "driverKey": key,
+        "driverKey": Keys,
         "contentType": "DriverAuthList",
-        "clearAuthList": False,
-        "addToAuthList": True
+        "clearAuthList": clear,
+        "addToAuthList": add
     }
 }
 
                api.add("TextMessage",data)
                action = "added to" if add else "removed from"
                logging.info(f"Keys {action} vehicle with ID: {vehicles_to_update}")
+               sleep(Time)
+          if clear:
+              api.add("TextMessage",data)
+              logging.info(f"All Keys removed from vehicle with ID: {vehicles_to_update}")
+
+
+           
        except Exception as e:
            logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}: {e}")
 
-def process_group(api, group, db_file):
-    group_id = group['id']
-    conn = create_connection(db_file)
+def process_group(api, group, conn):
     if conn:
-        new_keys, remove_keys = get_users_with_nfc_keys(api, group_id, conn)
-        devices, new_devices, removed_devices, all_keys = get_vans_by_group(api, group_id, conn)
-#        all_keys = get_all_keys(conn, group_id)  # Ensure all_keys is fetched after device insertion
+        new_keys, remove_keys, all_keys = get_users_with_nfc_keys(api, group_id, conn)
+        filtered_devices, new_devices = get_vans_by_group(api, group_id, conn,add=True)
         conn.close()
-        return new_keys, remove_keys, devices, new_devices, removed_devices, all_keys
-    return [], [], [], [], [], []
+        return new_keys, remove_keys, all_keys, filtered_devices, new_devices
+    return [], [], [], [], []
+
 ####Main Process
 def main():
     try:
         api.authenticate()
+        conn = create_connection(db_file)
         groups = api.get('Group', search=dict(active=True))
         filtered_groups = [group for group in groups if group['name'] in group_names]
+
+        for group in filtered_groups:
+            group_id = group['id']
+            removed_devices = get_vans_by_group(api, group_id, conn,add=False)
+
+## Need to add a break here to clear old devices before continuting           
+      
+            for device in removed_devices:
+                if removed_devices:
+                    vehicles_to_update = device['id']
+                    logging.info(f"Removed device {device['name']} (ID: {device['id']}). Clearing all keys from whitelist.")
+                    send_text_message(api, vehicles_to_update, None, add=False,clear=True,Time=0)
+
+## Need to add a break here to clear old devices before continuting           
+
         
         for group in filtered_groups:
-            new_keys, remove_keys, devices, new_devices, removed_devices, all_keys = process_group(api, group, db_file)
+            group_id = group['id']
+            new_keys, remove_keys, all_keys, filtered_devices, new_devices = process_group(api, group_id, conn)        
             
-            for device in devices:
+            for device in filtered_devices:
                 vehicles_to_update = device['id']
                 logging.info(f"Device {device['name']} found in group {group['name']} with ID: {device['id']}")
                 
                 if device['id'] in new_devices:
                     logging.info(f"{all_keys}")
                     logging.info(f"New device {device['name']} (ID: {device['id']}) found. Adding all keys to whitelist.")
-                    send_text_message(api, vehicles_to_update, all_keys, add=True)
+                    send_text_message(api, vehicles_to_update, all_keys, add=True,clear=False,Time=0.75)
                 else:
                     if new_keys:
-                        send_text_message(api, vehicles_to_update, new_keys, add=True)
+                        send_text_message(api, vehicles_to_update, new_keys, add=True,clear=False,Time=0.25)
                     if remove_keys:
-                        send_text_message(api, vehicles_to_update, remove_keys, add=False)
+                        send_text_message(api, vehicles_to_update, remove_keys, add=False,clear=False,Time=0.25)
             
     except Exception as e:
         logging.error(f"Error in main process: {e}")
