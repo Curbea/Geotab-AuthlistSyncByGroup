@@ -1,4 +1,4 @@
-from mygeotab import API
+from mygeotab import API,MyGeotabException
 from dotenv import load_dotenv
 import os
 import logging
@@ -91,7 +91,6 @@ def remove_unused_keys(conn, group_id, keys):
 
 def insert_devices(conn, group_id, devices):
     new_devices = []
-    all_keys = []
     try:
         with conn:
             c = conn.cursor()
@@ -102,11 +101,10 @@ def insert_devices(conn, group_id, devices):
                 if c.rowcount > 0:
                     new_devices.append(device['id'])
         logging.info(f"Devices inserted for group {group_id}: {new_devices}")
-        all_keys = get_all_keys(conn, group_id)
-        return new_devices, all_keys
+        return new_devices
     except sqlite3.Error as e:
         logging.error(f"Error inserting devices for group {group_id}: {e}")
-        return [], []
+        return []
 
 def remove_old_devices(conn, group_id, current_device_ids):
     removed_devices=[]
@@ -147,21 +145,42 @@ def get_vans_by_group(api, group_id, conn,add=False):
             custom_parameters = device.get('customParameters', [])
             for param in custom_parameters:
                 if param.get('description') == "Enable Authorised Driver List":
-                    filtered_devices.append(device)
+                    enable_authorised_driver_list_found = True
                     break
-        
-        if not filtered_devices:
-            logging.warning(f"No devices with 'Enable Authorised Driver List' enabled found in group ID: {group_id}")
+
+            if not enable_authorised_driver_list_found:
+                new_param = {
+                    "bytes": "CA==",
+                    "description": "Enable Authorised Driver List",
+                    "isEnabled": False,
+                    "offset": 164
+                }
+                custom_parameters.append(new_param)
+                
+                # Update the device with the new custom parameter
+                updated_device = device.copy()
+                updated_device['customParameters'] = custom_parameters
+                
+                try:
+                    api.set('Device', updated_device)
+                    logging.info(f"Updated device {device['name']} with new custom parameter.")
+                except Exception as e:
+                    logging.error(f"Failed to update device {device['id']}: {e}")
+
+            filtered_devices.append(device)
 
         if add:
             new_devices = insert_devices(conn, group_id, filtered_devices)
             return filtered_devices, new_devices
-
-
-        removed_devices = remove_old_devices(conn, group_id, [device['id'] for device in filtered_devices])
-        return removed_devices
+        else:
+            removed_devices = remove_old_devices(conn, group_id, [device['id'] for device in filtered_devices])
+            return removed_devices
+    except MyGeotabException as e:
+        logging.error(f"Geotab API error fetching devices for group {group_id}: {e}")
     except Exception as e:
-        logging.error(f"Error fetching devices for group {group_id}: {e}")
+        logging.error(f"Unexpected error fetching devices for group {group_id}: {e}")
+        raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
+
         return [], [], []
 ####Get Drivers###########################################################################################################################################################################
 #This section is to get all drivers by group, return their nfc key, compare it with the database, and either add or remove them from the database, and then in turn, the authlist
@@ -200,40 +219,55 @@ def get_users_with_nfc_keys(api, group_id, conn):
 ####Update Vehicles
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
 
-#def send_text_message(api, vehicles_to_update, all_keys, add=True):
-def send_text_message(api, vehicles_to_update, Keys, add=True,clear=False,Time=0):
-       try:
-          logging.info(f"Keys {Keys}")
-          for key in Keys:
-               logging.info(f"Key {key}")
-               data = {
+#def send_text_message(api, vehicle_to_update, all_keys, add=True):
+def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0):
+    try:
+        for key in Keys:
+            data = {
 
     "device": {
         "id": vehicle_to_update
     },
     "isDirectionToVehicle": True,
     "messageContent": {
-        "driverKey": Keys,
+        "driverKey": key,
         "contentType": "DriverAuthList",
         "clearAuthList": clear,
         "addToAuthList": add
     }
 }
 
-               api.add("TextMessage",data)
-               action = "added to" if add else "removed from"
-               logging.info(f"Keys {action} vehicle with ID: {vehicles_to_update}")
-               sleep(Time)
-          if clear:
-              api.add("TextMessage",data)
-              logging.info(f"All Keys removed from vehicle with ID: {vehicles_to_update}")
+            api.add("TextMessage",data)
+            action = "added to" if add else "removed from"
+            logging.info(f"Keys {action} vehicle with ID: {vehicle_to_update}")
+            sleep(Time)
+        
+##logs    
+    
+        except MyGeotabException as e:
+            logging.error(f"Geotab API error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
+                
+        except Exception as e:
+            logging.error(f"Unexpected error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
+            raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
+##For Vehicles were removing or updating; should have been sent a null array so we need to call it outside of the for loop. 
+        if clear:
+            api.add("TextMessage",data)
+            logging.info(f"All Keys removed from vehicle with ID: {vehicle_to_update}")
+#More logging         
+        except MyGeotabException as e:
+            logging.error(f"Geotab API error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
+        except Exception as e:
+            logging.error(f"Unexpected error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
+            raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
 
-
-           
-       except Exception as e:
-           logging.error(f"Error sending text message to vehicle with ID: {vehicles_to_update}: {e}")
-
-def process_group(api, group, conn):
+    except MyGeotabException as e:
+        logging.error(f"Geotab API error while processing keys for vehicle with ID: {vehicle_to_update}: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error while processing keys for vehicle with ID: {vehicle_to_update}: {e}")
+        raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
+#Back
+def process_group(api, group_id, conn):
     if conn:
         new_keys, remove_keys, all_keys = get_users_with_nfc_keys(api, group_id, conn)
         filtered_devices, new_devices = get_vans_by_group(api, group_id, conn,add=True)
@@ -257,9 +291,9 @@ def main():
       
             for device in removed_devices:
                 if removed_devices:
-                    vehicles_to_update = device['id']
+                    vehicle_to_update = device['id']
                     logging.info(f"Removed device {device['name']} (ID: {device['id']}). Clearing all keys from whitelist.")
-                    send_text_message(api, vehicles_to_update, None, add=False,clear=True,Time=0)
+                    send_text_message(api, vehicle_to_update, None, add=False,clear=True,Time=0)
 
 ## Need to add a break here to clear old devices before continuting           
 
@@ -269,18 +303,18 @@ def main():
             new_keys, remove_keys, all_keys, filtered_devices, new_devices = process_group(api, group_id, conn)        
             
             for device in filtered_devices:
-                vehicles_to_update = device['id']
+                vehicle_to_update = device['id']
                 logging.info(f"Device {device['name']} found in group {group['name']} with ID: {device['id']}")
                 
                 if device['id'] in new_devices:
                     logging.info(f"{all_keys}")
                     logging.info(f"New device {device['name']} (ID: {device['id']}) found. Adding all keys to whitelist.")
-                    send_text_message(api, vehicles_to_update, all_keys, add=True,clear=False,Time=0.75)
+                    send_text_message(api, vehicle_to_update, all_keys, add=True,clear=False,Time=0.75)
                 else:
                     if new_keys:
-                        send_text_message(api, vehicles_to_update, new_keys, add=True,clear=False,Time=0.25)
+                        send_text_message(api, vehicle_to_update, new_keys, add=True,clear=False,Time=0.25)
                     if remove_keys:
-                        send_text_message(api, vehicles_to_update, remove_keys, add=False,clear=False,Time=0.25)
+                        send_text_message(api, vehicle_to_update, remove_keys, add=False,clear=False,Time=0.25)
             
     except Exception as e:
         logging.error(f"Error in main process: {e}")
