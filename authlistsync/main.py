@@ -15,6 +15,11 @@ password = os.getenv('GEOTAB_PASSWORD')
 database = os.getenv('GEOTAB_DATABASE')
 group_names = os.getenv('GEOTAB_GROUPS', '').split(',')
 db_file = 'authlist.db'
+#Extra Config
+#Timezone Updater
+
+
+
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Initialize the API connection
@@ -236,30 +241,30 @@ def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0)
         "addToAuthList": add
     }
 }
-
-            api.add("TextMessage",data)
-            action = "added to" if add else "removed from"
-            logging.info(f"Keys {action} vehicle with ID: {vehicle_to_update}")
-            sleep(Time)
+            try:
+                api.add("TextMessage",data)
+                action = "added to" if add else "removed from"
+                logging.info(f"Keys {action} vehicle with ID: {vehicle_to_update}")
+                sleep(Time)
         
 ##logs    
-    
-        except MyGeotabException as e:
-            logging.error(f"Geotab API error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
+            except MyGeotabException as e:
+                logging.error(f"Geotab API error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
                 
-        except Exception as e:
-            logging.error(f"Unexpected error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
-            raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
+            except Exception as e:
+                logging.error(f"Unexpected error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
+                raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
 ##For Vehicles were removing or updating; should have been sent a null array so we need to call it outside of the for loop. 
         if clear:
-            api.add("TextMessage",data)
-            logging.info(f"All Keys removed from vehicle with ID: {vehicle_to_update}")
+            try:
+                api.add("TextMessage",data)
+                logging.info(f"All Keys removed from vehicle with ID: {vehicle_to_update}")
 #More logging         
-        except MyGeotabException as e:
-            logging.error(f"Geotab API error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
-        except Exception as e:
-            logging.error(f"Unexpected error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
-            raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
+            except MyGeotabException as e:
+                logging.error(f"Geotab API error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
+            except Exception as e:
+                logging.error(f"Unexpected error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
+                raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
 
     except MyGeotabException as e:
         logging.error(f"Geotab API error while processing keys for vehicle with ID: {vehicle_to_update}: {e}")
