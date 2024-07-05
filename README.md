@@ -4,7 +4,10 @@ This functions to set the Authorized Drivers List and sync it to all drivers in 
 
 This is intended to be thrown onto Cron or taskscheduler
 
-Other methods of managing the auth list such as the addins will work in conjunction with this, I would recommend them to enable the auth list on the iox reader, this does not do that.  
+Other methods of managing the auth list such as the addins will work in conjunction with this, I would recommend them to enable the auth list on the iox reader, this does not do that. 
+
+^ I'll probably add the parameter but set it to disabled in the future. I have seen the addin freeze up and not let me manage a device where it hadn't before
+
 This script will not interact with edits made from the addins. 
 
 If exceptions need to be made. I do not know yet if the Iox reader would store duplicates of the keys in the case of overlapping groups.
