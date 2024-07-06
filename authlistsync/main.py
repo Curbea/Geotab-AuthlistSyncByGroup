@@ -8,31 +8,37 @@ from datetime import datetime,timezone
 #import json
 # Load environment variables from .env file
 load_dotenv()
-
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 # Get MyGeotab credentials and groups from environment variables
 username = os.getenv('GEOTAB_USERNAME')
 password = os.getenv('GEOTAB_PASSWORD')
 database = os.getenv('GEOTAB_DATABASE')
 group_names = os.getenv('GEOTAB_GROUPS', '').split(',')
 db_file = 'authlist.db'
-#Extra Config
-#Timezone Updater
-
-
-
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Initialize the API connection
-api = API(username, password, database)
-
-###SQLITE Functions (Memory in between runs) ##################################################################################################################################################
-# We will be storing all keys in a table labeled keys_group id for comparison later, we need to keep a list of who we've added so we know what to remove in the future. There is a 1000 key limit on the iox device and we cannot retrieve this from the device itself. 
-# It also wouldn't make sense to enable this feature and not do this.
-# Should refactor to use the storage api eventually.
-# Function to create SQLite connection
-
 
 #Base Functions
+def authenticate(db_file):
+    """This is to authenticate and then grab the session token so all further calls need not reauthenticate; we also establish our sqlite connection"""
+    try:
+        api = API(username, password, database)
+        credentials = api.authenticate()
+        conn = create_connection(db_file)
+        logging.info("Authenticated successfully.")
+        new_api = API.from_credentials(credentials)
+        return new_api, conn, credentials
+    except Exception as e:
+        logging.error(f"Authentication failed: {e}")
+        raise
+
+
+
+
+
+###Database Functions (for memory in between runs) ##################################################################################################################################################
+# We will be storing all keys in a table labeled keys_group id for comparison later, we need to keep a list of who we've added so we know what to remove in the future. There is a 1000 key limit on the iox device and we cannot retrieve this from the device itself. 
+# It also wouldn't make sense to enable this feature and not do this.
+# Function to create SQLite connection
+
 def create_connection(db_file):
     try:
         conn = sqlite3.connect(db_file)
@@ -52,7 +58,7 @@ def create_table(conn, table_name, table_schema):
     except sqlite3.Error as e:
         logging.error(f"Error creating table {table_name}: {e}")
 
-### Driver Key storage
+### Insert new keys into database
 def insert_keys(conn, group_id, keys):
     new_keys = []
     try:
@@ -70,7 +76,11 @@ def insert_keys(conn, group_id, keys):
     except sqlite3.Error as e:
         logging.error(f"Error inserting keys for group {group_id}: {e}")
         return []
-#Remove Old Keys
+
+
+#Remove unused keys from storage
+
+
 def remove_unused_keys(conn, group_id, keys):
     removed_keys_list = []
     try:
@@ -92,6 +102,8 @@ def remove_unused_keys(conn, group_id, keys):
     except sqlite3.Error as e:
         logging.error(f"Error removing unused keys for group {group_id}: {e}")
         return removed_keys_list
+
+
 ##Vehicle Database portion
 
 def insert_devices(conn, group_id, devices):
@@ -110,6 +122,7 @@ def insert_devices(conn, group_id, devices):
     except sqlite3.Error as e:
         logging.error(f"Error inserting devices for group {group_id}: {e}")
         return []
+
 
 def remove_old_devices(conn, group_id, current_device_ids):
     removed_devices=[]
@@ -148,12 +161,7 @@ def get_vans_by_group(api, group_id, conn,add=False):
         filtered_devices = []
         for device in devices:
             custom_parameters = device.get('customParameters', [])
-            for param in custom_parameters:
-                if param.get('description') == "Enable Authorised Driver List":
-                    enable_authorised_driver_list_found = True
-                    break
-
-            if not enable_authorised_driver_list_found:
+            if not any(param.get('description') == "Enable Authorised Driver List" for param in custom_parameters):
                 new_param = {
                     "bytes": "CA==",
                     "description": "Enable Authorised Driver List",
@@ -161,11 +169,11 @@ def get_vans_by_group(api, group_id, conn,add=False):
                     "offset": 164
                 }
                 custom_parameters.append(new_param)
-                
+
                 # Update the device with the new custom parameter
                 updated_device = device.copy()
                 updated_device['customParameters'] = custom_parameters
-                
+
                 try:
                     api.set('Device', updated_device)
                     logging.info(f"Updated device {device['name']} with new custom parameter.")
@@ -186,12 +194,13 @@ def get_vans_by_group(api, group_id, conn,add=False):
         logging.error(f"Unexpected error fetching devices for group {group_id}: {e}")
         raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
 
-        return [], [], []
+        return [], []
 ####Get Drivers###########################################################################################################################################################################
 #This section is to get all drivers by group, return their nfc key, compare it with the database, and either add or remove them from the database, and then in turn, the authlist
 
-def get_users_with_nfc_keys(api, group_id, conn):
+def get_users_with_nfc_keys(api, group, conn):
     try:
+        group_id = group['id']
         # Create table if not exists for the group_id
         create_table(conn, f"keys_{group_id}", 
                      "driverKeyType TEXT, id TEXT, keyId TEXT, serialNumber TEXT PRIMARY KEY")
@@ -220,6 +229,10 @@ def get_users_with_nfc_keys(api, group_id, conn):
     except Exception as e:
         logging.error(f"Error fetching users with NFC keys for group {group_id}: {e}")
         return []
+
+def_patch_users(user,group)
+   """This function will be used to set proper clearances for drivers, it will also be used to set timezones according to their group"""
+
 
 ####Update Vehicles
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
@@ -272,9 +285,10 @@ def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0)
         logging.error(f"Unexpected error while processing keys for vehicle with ID: {vehicle_to_update}: {e}")
         raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
 #Back
-def process_group(api, group_id, conn):
+def process_group(api, group, conn):
     if conn:
-        new_keys, remove_keys, all_keys = get_users_with_nfc_keys(api, group_id, conn)
+        group_id = group['id']
+        new_keys, remove_keys, all_keys, group_id = get_users_with_nfc_keys(api, group, conn)
         filtered_devices, new_devices = get_vans_by_group(api, group_id, conn,add=True)
         conn.close()
         return new_keys, remove_keys, all_keys, filtered_devices, new_devices
@@ -283,8 +297,7 @@ def process_group(api, group_id, conn):
 ####Main Process
 def main():
     try:
-        api.authenticate()
-        conn = create_connection(db_file)
+        api, conn, credentials = authenticate(db_file)
         groups = api.get('Group', search=dict(active=True))
         filtered_groups = [group for group in groups if group['name'] in group_names]
 
@@ -304,8 +317,7 @@ def main():
 
         
         for group in filtered_groups:
-            group_id = group['id']
-            new_keys, remove_keys, all_keys, filtered_devices, new_devices = process_group(api, group_id, conn)        
+            new_keys, remove_keys, all_keys, group_id, filtered_devices, new_devices = process_group(api, group, conn)        
             
             for device in filtered_devices:
                 vehicle_to_update = device['id']
@@ -314,12 +326,12 @@ def main():
                 if device['id'] in new_devices:
                     logging.info(f"{all_keys}")
                     logging.info(f"New device {device['name']} (ID: {device['id']}) found. Adding all keys to whitelist.")
-                    send_text_message(api, vehicle_to_update, all_keys, add=True,clear=False,Time=0.75)
+                    send_text_message(api, vehicle_to_update, all_keys, add=True,clear=False,Time=0.10)
                 else:
                     if new_keys:
-                        send_text_message(api, vehicle_to_update, new_keys, add=True,clear=False,Time=0.25)
+                        send_text_message(api, vehicle_to_update, new_keys, add=True,clear=False,Time=0.01)
                     if remove_keys:
-                        send_text_message(api, vehicle_to_update, remove_keys, add=False,clear=False,Time=0.25)
+                        send_text_message(api, vehicle_to_update, remove_keys, add=False,clear=False,Time=0.01)
             
     except Exception as e:
         logging.error(f"Error in main process: {e}")
