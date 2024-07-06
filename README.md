@@ -1,15 +1,22 @@
-WIP
+WIP,
 
-This functions to set the Authorized Drivers List and sync it to all drivers in the same group as the vehicle
+A problem with Geotab is that by default any nfc tag from them can be used in the vehicle; if that tag is not registered in the database, 
+the vehicle is assigned to the "Unknown Driver" for the duration of the trip. The problem with this is that "Unknown Driver" does not appear in any reporting done on user's, from a liability reduction standpoint this is an issue;
+Mainly this will also add precious time to any accident response.
 
-This is intended to be thrown onto Cron or taskscheduler
+Geotab has a fairly unmentioned feature for it's nfc device's: A whitelist of nfc tags can be provided to the device, and stored locally on the device, 
+to ensure that for every driver assignment event we end up with an actual driver
 
-Other methods of managing the auth list such as the addins will work in conjunction with this, I would recommend them to enable the auth list on the iox reader, this does not do that. 
+This script is fundamentally designed to synchronize a group of drivers with a group of vehicles
 
-^ I'll probably add the parameter but set it to disabled in the future. I have seen the addin freeze up and not let me manage a device where it hadn't before
+For every vehicle missing the required parameter it will be added to the device, but set to disabled. This is to ensure that the device recieves it's whitelist. This will need to be manually enabled in the advanced section of the asset.
 
-This script will not interact with edits made from the addins. 
+For vehicles that are no longer assigned to their original group, they will recieve a clear whitelist message, before recieving a new whitelist.
 
-If exceptions need to be made. I do not know yet if the Iox reader would store duplicates of the keys in the case of overlapping groups.
+This is intended to be run through cron
 
-If you send a clear auth list command from the ui, ensure that you delete that vehicle entry from the table else only new changes will be commited.
+To do:
+Add a polling mechanism prior to sending off 
+Add some routine user modifications for new hires
+Add a post run that verifies receipt of the text messages
+Set the parameter to disabled before the clear message is sent
