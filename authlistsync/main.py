@@ -264,8 +264,8 @@ def get_users_with_nfc_keys(api, group, conn):
                     nfc_keys.append(key_data)
             all_userids.append(user['id')
         # Get new keys inserted and removed from the database
-        if patch_users:
-            patch_users(users, group, conn, all_userid, group_id)
+        if patch_attributes and patch_users:
+            modify_users(users, group, conn, all_userid, group_id)
         new_keys = insert_keys(conn, group_id, nfc_keys)
         remove_keys = remove_unused_keys(conn, group_id, nfc_keys)
         all_keys = nfc_keys
@@ -274,7 +274,7 @@ def get_users_with_nfc_keys(api, group, conn):
         logging.error(f"Error fetching users with NFC keys for group {group_id}: {e}")
         return []
 
-def_patch_users(users, group, conn, all_userid, group_id)
+def_modify_users(users, group, conn, all_userid, group_id)
    """This function will be used to set proper clearances for drivers, it will set timezones according to their group"""
     try:
         remove_unused_users(conn, group_id, all_userid)
