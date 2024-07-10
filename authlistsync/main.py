@@ -103,7 +103,48 @@ def remove_unused_keys(conn, group_id, keys):
         logging.error(f"Error removing unused keys for group {group_id}: {e}")
         return removed_keys_list
 
+# I stored users seperate from keys to prevent un needed checks or issues; if we use user id's as the primary key then key updates would not work, 
+# the other way around would make unnecessary set calls or checks that might end up overriding intended exceptions. 
+# The other thing to prevent is if a user were in two groups that had different intended TZ's they would get two change calls everytime this ran
+# This way users will only be processed once they join a group and that's it.
+def insert_users(conn, group_id, users, userids):
+    new_usersid = []
+    try:
+        create_table(conn, f"users_{group_id}", "userid TEXT PRIMARY KEY")
+        with conn:
+            c = conn.cursor()
+            for userid in all_userids:
+                c.execute(f'''
+                    INSERT OR IGNORE INTO users_{group_id} (userid) 
+                    VALUES (?)
+                ''', (userid,))
+                if c.rowcount > 0:
+                    new_usersid.append(userid)
+        logging.info(f"New users stored for group {group_id}: {new_usersid}")
+        return new_usersid
+    except sqlite3.Error as e:
+        logging.error(f"Error inserting users for group {group_id}: {e}")
+        return []
 
+def remove_unused_users(conn, group_id, user_ids):
+    try:
+        c = conn.cursor()
+        placeholders = ','.join('?' for _ in user_ids)
+        query = f'''
+            DELETE FROM users_{group_id} WHERE userid NOT IN ({placeholders})
+            RETURNING userid
+        '''
+        c.execute(query, user_ids)
+        removed_users = c.fetchall()
+        conn.commit()
+        
+        if removed_users:
+            logging.info(f"Users removed for group {group_id}")
+        
+        return removed_users
+    except sqlite3.Error as e:
+        logging.error(f"Error removing unused users for group {group_id}: {e}")
+        return removed_users_list
 ##Vehicle Database portion
 
 def insert_devices(conn, group_id, devices):
@@ -148,7 +189,7 @@ def remove_old_devices(conn, group_id, current_device_ids):
 
 
 ###Get Vehicles#############################################################################################################################################################################
-#This section is to get all vehicles in group that have the authorized driver list enabled, return their nfc key, compare it with the database, and either add or remove them from the database, 
+#This section is to get all vehicles in group, add the custom parameter if it is missing; return their nfc key, compare it with the database, and either add or remove them from the database, 
 #and then in turn, the authlist
 
 def get_vans_by_group(api, group_id, conn,add=False):
@@ -209,7 +250,7 @@ def get_users_with_nfc_keys(api, group, conn):
         users = api.get('User', search={'driverGroups': [{'id': group_id}], "fromDate": now_utc ,"isDriver": True })
    
         """Fetch users and their keys - we only want users in the group of the loop (group id), we only want active users, (dateFrom); Is driver, we only need to return users that can or do have keys"""
-
+        all_userids = []
         nfc_keys = []
         for user in users:
             if 'keys' in user:
@@ -221,7 +262,10 @@ def get_users_with_nfc_keys(api, group, conn):
                         'serialNumber': key.get('serialNumber')
                     }
                     nfc_keys.append(key_data)
+            all_userids.append(user['id')
         # Get new keys inserted and removed from the database
+        if patch_users:
+            patch_users(users, group, conn, all_userid, group_id)
         new_keys = insert_keys(conn, group_id, nfc_keys)
         remove_keys = remove_unused_keys(conn, group_id, nfc_keys)
         all_keys = nfc_keys
@@ -230,8 +274,18 @@ def get_users_with_nfc_keys(api, group, conn):
         logging.error(f"Error fetching users with NFC keys for group {group_id}: {e}")
         return []
 
-def_patch_users(user,group)
-   """This function will be used to set proper clearances for drivers, it will also be used to set timezones according to their group"""
+def_patch_users(users, group, conn, all_userid, group_id)
+   """This function will be used to set proper clearances for drivers, it will set timezones according to their group"""
+    try:
+        remove_unused_users(conn, group_id, all_userid)
+        new_users = insert_users(conn, group_id, users, all_userid)
+        if new_users:
+            group_tz = os.getenv(f"{group['name']}", 'America/Vancouver')
+            for user in users:
+                if user['id'] in new_users
+                    if user.get('timezoneid') != group_tz:
+
+                    if user.get('securityGroup') in clearances_to_patch:
 
 
 ####Update Vehicles
@@ -326,7 +380,7 @@ def main():
                 if device['id'] in new_devices:
                     logging.info(f"{all_keys}")
                     logging.info(f"New device {device['name']} (ID: {device['id']}) found. Adding all keys to whitelist.")
-                    send_text_message(api, vehicle_to_update, all_keys, add=True,clear=False,Time=0.10)
+                    send_text_message(api, vehicle_to_update, all_keys, add=True,clear=False,Time=0.02)
                 else:
                     if new_keys:
                         send_text_message(api, vehicle_to_update, new_keys, add=True,clear=False,Time=0.01)
