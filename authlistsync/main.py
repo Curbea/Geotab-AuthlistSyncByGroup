@@ -15,8 +15,13 @@ password = os.getenv('GEOTAB_PASSWORD')
 database = os.getenv('GEOTAB_DATABASE')
 group_names = os.getenv('GEOTAB_GROUPS', '').split(',')
 db_file = 'authlist.db'
-new_sc = os.getenv('NEW_SC_NAME', None)
-old_sc = os.getenv('OLD_SC_NAMES', None).split(',')
+patch_users = os.getenv('PATCH_USERS', 'False')
+patch_assets = os.getenv('PATCH_ASSETS', 'False')
+patch_tz = os.getenv('PATCH_TZ', False)
+patch_sc = os.getenv('PATCH_SC', False)
+new_scid = os.getenv('NEW_SC_ID', None)
+old_scid = os.getenv('OLD_SC_ID', None).split(',')
+exception_group_id=os.getenv('EXCEPTION_GROUP_ID', None)
 now = datetime.now()
 
 
@@ -112,7 +117,7 @@ def remove_unused_keys(conn, group_id, keys):
 # the other way around would make unnecessary set calls or checks that might end up overriding intended exceptions. 
 # The other thing to prevent is if a user were in two groups that had different intended TZ's they would get two change calls everytime this ran
 # This way users will only be processed once they join a group and that's it.
-def insert_users(conn, group_id, users, all_userids):
+def insert_users(conn, group_id, all_userids):
     new_usersid = []
     try:
         with conn:
@@ -217,7 +222,7 @@ def get_vans_by_group(api, group_id, group_name, conn,add=False):
                 # Update the device with the new custom parameter
             group_tz = os.getenv(f"{group_name}", 'America/Vancouver')
             updated = False
-            if device.get('timeZoneId') != group_tz:
+            if patch_assets and patch_tz and device.get('timeZoneId') != group_tz:
                 device['timeZoneId'] = group_tz
                 updated = True
             
@@ -229,7 +234,7 @@ def get_vans_by_group(api, group_id, group_name, conn,add=False):
 
                 try:
                     api.set('Device', updated_device)
-                    logging.info(f"Updated device {device['name']} with new custom parameter.")
+                    logging.info(f"Updated device {device['name']}")
                 except Exception as e:
                     logging.error(f"Failed to update device {device['id']}: {e}")
 
@@ -246,8 +251,6 @@ def get_vans_by_group(api, group_id, group_name, conn,add=False):
         else:
             removed_devices = remove_old_devices(conn, group_id, [device['id'] for device in filtered_devices])
             return removed_devices
-    except MyGeotabException as e:
-        logging.error(f"Geotab API error fetching devices for group {group_id}: {e}")
     except Exception as e:
         logging.error(f"Unexpected error fetching devices for group {group_id}: {e}")
         raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
@@ -255,15 +258,34 @@ def get_vans_by_group(api, group_id, group_name, conn,add=False):
         return [], []
 ####Get Drivers###########################################################################################################################################################################
 #This section is to get all drivers by group, return their nfc key, compare it with the database, and either add or remove them from the database, and then in turn, the authlist
-
-def get_users_with_nfc_keys(api, group_id, group_name, conn, new_scid, old_scid):
+def get_exception_users(api , exception_group):
+    try:
+        exception_keys = []
+        now_utc = datetime.now(timezone.utc)
+        users = api.get('User', search={'companyGroups': [{'id': exception_group}], "fromDate": now_utc})
+        for user in users:
+            if 'keys' in user:
+                for key in user['keys']:
+                    key_data = {
+                        'driverKeyType': key.get('driverKeyType'),
+                        'id': key.get('id'),
+                        'keyId': key.get('keyId'),
+                        'serialNumber': key.get('serialNumber')
+                    }
+                    exception_keys.append(key_data)
+ 
+        return exception_keys
+    except Exception as e:
+        logging.error(f"Error fetching users with NFC keys for exception group: {e}")
+        return []
+def get_users_with_nfc_keys(api, group_id, group_name, conn, exception_keys):
     try:
         # Create table if not exists for the group_id
         create_table(conn, f"keys_{group_id}", 
                      "driverKeyType TEXT, id TEXT, keyId TEXT, serialNumber TEXT PRIMARY KEY")
         #We only want active Drivers 
         now_utc = datetime.now(timezone.utc)
-        users = api.get('User', search={'driverGroups': [{'id': group_id}], "fromDate": now_utc ,"isDriver": True })
+        users = api.get('User', search={'companyGroups': [{'id': group_id}], "fromDate": now_utc ,"isDriver": True })
    
         """Fetch users and their keys - we only want users in the group of the loop (group id), we only want active users, (dateFrom); Is driver, we only need to return users that can or do have keys"""
         all_userids = []
@@ -279,28 +301,26 @@ def get_users_with_nfc_keys(api, group_id, group_name, conn, new_scid, old_scid)
                     }
                     nfc_keys.append(key_data)
             all_userids.append(user['id'])
+
         # Get new keys inserted and removed from the database
-        patch_users = os.getenv('PATCH_USERS', 'False')
         if patch_users:
-            modify_users(api, users, conn, all_userids, group_id, group_name, new_scid, old_scid)
-        new_keys = insert_keys(conn, group_id, nfc_keys)
-        remove_keys = remove_unused_keys(conn, group_id, nfc_keys)
-        all_keys = nfc_keys
-        return new_keys, remove_keys, all_keys, group_id
+            modify_users(api, users, conn, all_userids, group_id, group_name)
+        all_keys = nfc_keys + [key for key in exception_keys if key['serialNumber'] not in {k['serialNumber'] for k in nfc_keys}]
+        new_keys = insert_keys(conn, group_id, all_keys)
+        remove_keys = remove_unused_keys(conn, group_id, all_keys)
+        return new_keys, remove_keys, all_keys
     except Exception as e:
         logging.error(f"Error fetching users with NFC keys for group {group_id}: {e}")
-        return []
+        return [],[],[]
 
-def modify_users(api, users, conn, all_userid, group_id, group_name, new_scid, old_scid):
+def modify_users(api, users, conn, all_userid, group_id, group_name):
     """This function will be used to set proper clearances for drivers, it will set timezones according to their group"""
     try:
         create_table(conn, f"users_{group_id}", "userid TEXT PRIMARY KEY")
         remove_unused_users(conn, group_id, all_userid)
-        new_users = insert_users(conn, group_id, users, all_userid)
+        new_users = insert_users(conn, group_id, all_userid)
         if new_users:
             group_tz = os.getenv(f"{group_name}", 'America/Vancouver')            
-            patch_tz = os.getenv('PATCH_TZ', False)
-            patch_sc = os.getenv('PATCH_SC', False)
 
 
             for user in users:
@@ -347,15 +367,13 @@ def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0)
     }
 }
             try:
-                api.add("TextMessage",data)
-                action = "added to" if add else "removed from"
-                logging.info(f"Keys {action} vehicle with ID: {vehicle_to_update}")
-                sleep(Time)
+                if key:
+                    api.add("TextMessage",data)
+                    action = "added to" if add else "removed from"
+                    logging.info(f"Keys {action} vehicle with ID: {vehicle_to_update}")
+                    sleep(Time)
         
-##logs    
-            except MyGeotabException as e:
-                logging.error(f"Geotab API error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
-                
+##logs                    
             except Exception as e:
                 logging.error(f"Unexpected error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
                 raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
@@ -365,23 +383,18 @@ def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0)
                 api.add("TextMessage",data)
                 logging.info(f"All Keys removed from vehicle with ID: {vehicle_to_update}")
 #More logging         
-            except MyGeotabException as e:
-                logging.error(f"Geotab API error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
             except Exception as e:
                 logging.error(f"Unexpected error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
                 raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
-
-    except MyGeotabException as e:
-        logging.error(f"Geotab API error while processing keys for vehicle with ID: {vehicle_to_update}: {e}")
     except Exception as e:
         logging.error(f"Unexpected error while processing keys for vehicle with ID: {vehicle_to_update}: {e}")
         raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
 #Back
-def process_group(api, group, conn, new_scid, old_scid):
+def process_group(api, group, conn, exception_keys):
     if conn:
         group_id = group['id']
         group_name = group['name']
-        new_keys, remove_keys, all_keys, group_id = get_users_with_nfc_keys(api, group_id, group_name, conn, new_scid, old_scid)
+        new_keys, remove_keys, all_keys = get_users_with_nfc_keys(api, group_id, group_name, conn, exception_keys)
         filtered_devices, new_devices = get_vans_by_group(api, group_id, group_name, conn, add=True)
         return new_keys, remove_keys, all_keys, group_id, group_name, filtered_devices, new_devices
     return [], [], [], [], [], []
@@ -390,27 +403,25 @@ def process_group(api, group, conn, new_scid, old_scid):
 def main():
     try:
         api, conn, credentials = authenticate(db_file)
-        groups = api.get('Group', search=dict(active=True),IncludeAllTrees=True)
+        groups = api.get('Group', search=dict(active=True))
         filtered_groups = [group for group in groups if group['name'] in group_names]
-        if now.weekday() == 1:
-            for group in filtered_groups:
-                group_id = group['id']
-                group_name = group['name']
-                removed_devices = get_vans_by_group(api, group_id, group_name,conn,add=False)
+        for group in filtered_groups:
+            group_id = group['id']
+            group_name = group['name']
+            removed_devices = get_vans_by_group(api, group_id, group_name,conn,add=False)
 ## Need to add a break here to clear old devices before continuting           
-                for device in removed_devices:
-                    if removed_devices:
-                        vehicle_to_update = device['id']
-                        logging.info(f"Removed device {device['name']} (ID: {device['id']}). Clearing all keys from whitelist.")
-                        send_text_message(api, vehicle_to_update, None, add=False,clear=True,Time=0)
-                del(removed_devices)
+            for device in removed_devices:
+                if removed_devices:
+                    vehicle_to_update = device['id']
+                    logging.info(f"Removed device {device['name']} (ID: {device['id']}). Clearing all keys from whitelist.")
+                    send_text_message(api, vehicle_to_update, None, add=False,clear=True,Time=0)
+            del(removed_devices)
 
 ## Need to add a break here to clear old devices before continuting           
-        new_scid = [group['id'] for group in groups if group ['name'] == new_sc]
-        old_scid = [group['id'] for group in groups if group ['name'] in old_sc]
-        del(groups)        
+        exception_keys = get_exception_users(api, exception_group_id)
+        
         for group in filtered_groups:
-            new_keys, remove_keys, all_keys, group_id, group_name, filtered_devices, new_devices = process_group(api, group, conn, new_scid, old_scid)        
+            new_keys, remove_keys, all_keys, group_id, group_name, filtered_devices, new_devices = process_group(api, group, conn, exception_keys)        
             
             for device in filtered_devices:
                 vehicle_to_update = device['id']
