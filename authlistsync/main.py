@@ -206,11 +206,11 @@ def get_vans_by_group(api, group_id, group_name, conn,add=False):
         logging.info(f"Fetching devices for group ID: {group_id}")
         now_utc = datetime.now(timezone.utc)
         devices = api.get('Device', search={'groups': [{'id': group_id}], "fromDate": now_utc})
-        
         filtered_devices = []
         for device in devices:
+            updated = False
             custom_parameters = device.get('customParameters', [])
-            if not any(param.get('description') == "Enable Authorised Driver List" for param in custom_parameters):
+            if add and not any(param.get('description') == "Enable Authorised Driver List" for param in custom_parameters):
                 new_param = {
                     "bytes": "CA==",
                     "description": "Enable Authorised Driver List",
@@ -218,15 +218,15 @@ def get_vans_by_group(api, group_id, group_name, conn,add=False):
                     "offset": 164
                 }
                 custom_parameters.append(new_param)
+                updated = True
 
                 # Update the device with the new custom parameter
             group_tz = os.getenv(f"{group_name}", 'America/Vancouver')
-            updated = False
             if patch_assets and patch_tz and device.get('timeZoneId') != group_tz:
                 device['timeZoneId'] = group_tz
                 updated = True
             
-            if custom_parameters or updated:
+            if  updated:
 
    
                 updated_device = device.copy()
@@ -238,10 +238,10 @@ def get_vans_by_group(api, group_id, group_name, conn,add=False):
                 except Exception as e:
                     logging.error(f"Failed to update device {device['id']}: {e}")
 
-                all_devices = {
-                    'id': device.get('id'),
-                    'serialNumber': device.get('serialNumber')
-                }
+            all_devices = {
+                'id': device.get('id'),
+                'serialNumber': device.get('serialNumber')
+            }
 
             filtered_devices.append(all_devices)
         del(devices)
@@ -350,7 +350,7 @@ def modify_users(api, users, conn, all_userid, group_id, group_name):
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
 
 #def send_text_message(api, vehicle_to_update, all_keys, add=True):
-def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0):
+def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0, retries=3, delay=5):
     try:
         for key in Keys:
             data = {
@@ -366,17 +366,22 @@ def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0)
         "addToAuthList": add
     }
 }
-            try:
-                if key:
-                    api.add("TextMessage",data)
-                    action = "added to" if add else "removed from"
-                    logging.info(f"Keys {action} vehicle with ID: {vehicle_to_update}")
-                    sleep(Time)
-        
-##logs                    
-            except Exception as e:
-                logging.error(f"Unexpected error while sending text message to vehicle with ID: {vehicle_to_update}: {e}")
-                raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
+            for attempt in range(retries):
+                try:
+                    if key:
+                        api.add("TextMessage",data)
+                        action = "added to" if add else "removed from"
+                        logging.info(f"Keys {action} vehicle with ID: {vehicle_to_update}")
+                        sleep(Time)
+                    break  # If successful, break out of the retry loop
+                except Exception as e:
+                    logging.error(f"Unexpected error while sending text message to vehicle with ID: {vehicle_to_update} on attempt {attempt + 1}: {e}")
+                    if attempt < retries - 1:
+                        logging.info(f"Retrying in {delay} seconds...")
+                        sleep(delay)
+                    else:
+                        logging.error(f"Failed after {retries} attempts")
+                        raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
 ##For Vehicles were removing or updating; should have been sent a null array so we need to call it outside of the for loop. 
         if clear:
             try:
@@ -414,7 +419,7 @@ def main():
                 if removed_devices:
                     vehicle_to_update = device['id']
                     logging.info(f"Removed device {device['name']} (ID: {device['id']}). Clearing all keys from whitelist.")
-                    send_text_message(api, vehicle_to_update, None, add=False,clear=True,Time=0)
+                    send_text_message(api, vehicle_to_update, None, add=False,clear=True,Time=0, retries=3, delay=5)
             del(removed_devices)
 
 ## Need to add a break here to clear old devices before continuting           
@@ -428,14 +433,13 @@ def main():
                 logging.info(f"Processing Device {vehicle_to_update} in group {group_name}")
                 
                 if device['id'] in new_devices:
-                    logging.info(f"{all_keys}")
                     logging.info(f"New device ID: {vehicle_to_update} found. Adding all keys to whitelist.")
-                    send_text_message(api, vehicle_to_update, all_keys, add=True,clear=False,Time=0.02)
+                    send_text_message(api, vehicle_to_update, all_keys, add=True,clear=False,Time=0.02,retries=3, delay=5)
                 else:
                     if new_keys:
-                        send_text_message(api, vehicle_to_update, new_keys, add=True,clear=False,Time=0.01)
+                        send_text_message(api, vehicle_to_update, new_keys, add=True,clear=False,Time=0.01,retries=3, delay=5)
                     if remove_keys:
-                        send_text_message(api, vehicle_to_update, remove_keys, add=False,clear=False,Time=0.01)
+                        send_text_message(api, vehicle_to_update, remove_keys, add=False,clear=False,Time=0.01,retries=3, delay=5)
         
         conn.close()
   
