@@ -8,7 +8,12 @@ from datetime import datetime,timezone
 #import json
 # Load environment variables from .env file
 load_dotenv()
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+log_file_path = 'authlistlog.txt'
+logging.basicConfig(
+    filename=log_file_path,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 # Get MyGeotab credentials and groups from environment variables
 username = os.getenv('GEOTAB_USERNAME')
 password = os.getenv('GEOTAB_PASSWORD')
