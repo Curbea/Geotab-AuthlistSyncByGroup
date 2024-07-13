@@ -62,12 +62,14 @@ def create_connection(db_file):
         logging.error(f"Error connecting to SQLite database: {e}")
     return None
 
-def create_table(conn, table_name, table_schema):
+def create_table(conn, table_name, table_schema, unique):
     try:
         with conn:
             conn.execute(f'''
                 CREATE TABLE IF NOT EXISTS {table_name} (
-                    {table_schema}
+                    {table_schema},
+                    UNIQUE({unique})
+
                 );
             ''')
     except sqlite3.Error as e:
@@ -171,11 +173,33 @@ def insert_devices(conn, group_id, devices):
                 ''', (device['id'], device['serialNumber']))
                 if c.rowcount > 0:
                     new_devices.append(device['id'])
-        logging.info(f"Devices inserted for group {group_id}: {new_devices}")
+        logging.debug(f"Devices inserted for group {group_id}: {new_devices}")
+        if new_devices:    
+            add_columns(conn, group_id, new_devices)
         return new_devices
     except sqlite3.Error as e:
         logging.error(f"Error inserting devices for group {group_id}: {e}")
         return []
+
+
+def add_columns(conn, group_id, columns):
+    try:
+        with conn:
+            cursor = conn.cursor()
+            # Get the current columns in the table
+            cursor.execute(f"PRAGMA table_info(keys_{group_id})")
+            current_columns = [info[1] for info in cursor.fetchall()]
+
+            for column in columns:
+                if column not in current_columns:
+                    cursor.execute(f'''
+                        ALTER TABLE keys_{group_id} ADD COLUMN {column} INTEGER DEFAULT 0
+                    ''')
+                    logging.debug(f"Added missing column {column} to keys_{group_id}")
+                else:
+                    logging.debug(f"Column {column} already exists in keys_{group_id}")
+    except sqlite3.Error as e:
+        logging.error(f"Error adding columns to keys_{group_id}: {e}")
 
 
 def remove_old_devices(conn, group_id, current_device_ids):
@@ -184,22 +208,108 @@ def remove_old_devices(conn, group_id, current_device_ids):
         c = conn.cursor()
         placeholders = ','.join('?' for _ in current_device_ids)
         query = f'''
-            DELETE FROM devices_{group_id} WHERE deviceId NOT IN ({placeholders})
+            DELETE FROM devices_{group_id} WHERE serialNumber NOT IN ({placeholders})
             RETURNING deviceId
         '''
         c.execute(query, current_device_ids)
-        removed_devices = c.fetchall()
+        removed_devices_tuples = c.fetchall()
         conn.commit()
-        
+        removed_devices = [device[0] for device in removed_devices_tuples]
         if removed_devices:
-            removed_device_list = [device[0] for device in removed_devices]
-            logging.info(f"Devices removed for group {group_id}: {removed_device_list}")
-        
+            remove_columns(conn, group_id, removed_devices)
+
         return removed_devices
     except sqlite3.Error as e:
         logging.error(f"Error removing old devices for group {group_id}: {e}")
         return []
 
+def remove_columns(conn, group_id, columns_to_remove):
+    try:
+        with conn:
+            cursor = conn.cursor()
+
+            # Get the current columns in the table
+            cursor.execute(f"PRAGMA table_info(keys_{group_id})")
+            current_columns_info = cursor.fetchall()
+            current_columns = [info[1] for info in current_columns_info]
+
+            # Determine the columns to keep
+            columns_to_keep = [col for col in current_columns if col not in columns_to_remove]
+
+            # Generate the new table schema without the columns to remove
+            new_table_schema = ', '.join(columns_to_keep)
+            old_table = f"keys_{group_id}"
+            new_table = f"{old_table}_new"
+
+            # Get the current column definitions
+            column_definitions = ', '.join([
+                f"{info[1]} {info[2]} {'PRIMARY KEY' if info[5] else ''} {'NOT NULL' if info[3] else ''}"
+                for info in current_columns_info if info[1] in columns_to_keep
+            ])
+
+            # Create a new table with the remaining columns
+            create_query = f'''
+                CREATE TABLE {new_table} ({column_definitions})
+            '''
+            logging.debug(f"Create query: {create_query}")
+            cursor.execute(create_query)
+
+            # Copy data from the old table to the new table
+            copy_data_query = f'''
+                INSERT INTO {new_table} ({new_table_schema})
+                SELECT {new_table_schema} FROM {old_table}
+            '''
+            logging.debug(f"Copy data query: {copy_data_query}")
+            cursor.execute(copy_data_query)
+
+            # Drop the old table
+            cursor.execute(f"DROP TABLE {old_table}")
+
+            # Rename the new table to the original table name
+            cursor.execute(f"ALTER TABLE {new_table} RENAME TO {old_table}")
+
+        logging.debug(f"Removed columns from keys_{group_id}: {columns_to_remove}")
+    except sqlite3.Error as e:
+        logging.error(f"Error removing columns from keys_{group_id}: {e}")
+
+def update_device_column(conn, group_id, serial_number, column, value):
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(f'''
+                UPDATE keys_{group_id}
+                SET {column} = ?
+                WHERE serialNumber = ?
+            ''', (value, serial_number))
+    except sqlite3.Error as e:
+        logging.error(f"Error updating column {column} in keys_{group_id}: {e}")
+
+def search_failed(conn, group_id, column):
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(f'''
+                SELECT driverKeyType, id, keyId, serialNumber
+                FROM keys_{group_id}
+                WHERE {column} = 0
+            ''')
+            results = cursor.fetchall()
+
+            keys = []
+            for row in results:
+                key_data = {
+                    'driverKeyType': row[0],
+                    'id': row[1],
+                    'keyId': row[2],
+                    'serialNumber': row[3]
+                }
+                keys.append(key_data)
+
+        logging.info(f"Found keys with {column} = 0 in keys_{group_id}: {keys}")
+        return keys
+    except sqlite3.Error as e:
+        logging.error(f"Error searching for {column} = 0 in keys_{group_id}: {e}")
+        return []
 
 ###Get Vehicles#############################################################################################################################################################################
 #This section is to get all vehicles in group, add the custom parameter if it is missing; return their nfc key, compare it with the database, and either add or remove them from the database, 
@@ -207,7 +317,7 @@ def remove_old_devices(conn, group_id, current_device_ids):
 
 def get_vans_by_group(api, group_id, group_name, conn,add=False):
     try:
-        create_table(conn, f"devices_{group_id}", "serialNumber TEXT PRIMARY KEY, deviceId TEXT")
+        create_table(conn, f"devices_{group_id}", "serialNumber TEXT PRIMARY KEY, deviceId TEXT", "serialNumber")
         logging.info(f"Fetching devices for group ID: {group_id}")
         now_utc = datetime.now(timezone.utc)
         devices = api.get('Device', search={'groups': [{'id': group_id}], "fromDate": now_utc})
@@ -254,7 +364,7 @@ def get_vans_by_group(api, group_id, group_name, conn,add=False):
             new_devices = insert_devices(conn, group_id, filtered_devices)
             return filtered_devices, new_devices
         else:
-            removed_devices = remove_old_devices(conn, group_id, [device['id'] for device in filtered_devices])
+            removed_devices = remove_old_devices(conn, group_id, [device['serialNumber'] for device in filtered_devices])
             return removed_devices
     except Exception as e:
         logging.error(f"Unexpected error fetching devices for group {group_id}: {e}")
@@ -286,8 +396,7 @@ def get_exception_users(api , exception_group):
 def get_users_with_nfc_keys(api, group_id, group_name, conn, exception_keys):
     try:
         # Create table if not exists for the group_id
-        create_table(conn, f"keys_{group_id}", 
-                     "driverKeyType TEXT, id TEXT, keyId TEXT, serialNumber TEXT PRIMARY KEY")
+        create_table(conn, f"keys_{group_id}", "driverKeyType TEXT, id TEXT, keyId TEXT, serialNumber TEXT PRIMARY KEY", "serialNumber")
         #We only want active Drivers 
         now_utc = datetime.now(timezone.utc)
         users = api.get('User', search={'companyGroups': [{'id': group_id}], "fromDate": now_utc ,"isDriver": True })
@@ -321,7 +430,7 @@ def get_users_with_nfc_keys(api, group_id, group_name, conn, exception_keys):
 def modify_users(api, users, conn, all_userid, group_id, group_name):
     """This function will be used to set proper clearances for drivers, it will set timezones according to their group"""
     try:
-        create_table(conn, f"users_{group_id}", "userid TEXT PRIMARY KEY")
+        create_table(conn, f"users_{group_id}", "userid TEXT PRIMARY KEY","userid")
         remove_unused_users(conn, group_id, all_userid)
         new_users = insert_users(conn, group_id, all_userid)
         if new_users:
@@ -355,7 +464,7 @@ def modify_users(api, users, conn, all_userid, group_id, group_name):
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
 
 #def send_text_message(api, vehicle_to_update, all_keys, add=True):
-def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0, retries=3, delay=5):
+def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True,clear=False,Time=0, retries=3, delay=5):
     try:
         for key in Keys:
             data = {
@@ -376,7 +485,9 @@ def send_text_message(api, vehicle_to_update, Keys, add=True,clear=False,Time=0,
                     if key:
                         api.add("TextMessage",data)
                         action = "added to" if add else "removed from"
-                        logging.info(f"Keys {action} vehicle with ID: {vehicle_to_update}")
+                        logging.debug(f"Keys {action} device {vehicle_to_update} Key: {key}")
+                        if add:
+                            update_device_column(conn, group_id, key['serialNumber'], vehicle_to_update, 1)
                         sleep(Time)
                     break  # If successful, break out of the retry loop
                 except Exception as e:
@@ -419,12 +530,13 @@ def main():
             group_id = group['id']
             group_name = group['name']
             removed_devices = get_vans_by_group(api, group_id, group_name,conn,add=False)
+            logging.debug(f"Removed devices: {removed_devices}")
+
 ## Need to add a break here to clear old devices before continuting           
             for device in removed_devices:
                 if removed_devices:
-                    vehicle_to_update = device['id']
-                    logging.info(f"Removed device {device['name']} (ID: {device['id']}). Clearing all keys from whitelist.")
-                    send_text_message(api, vehicle_to_update, None, add=False,clear=True,Time=0, retries=3, delay=5)
+                    null_key = []
+                    send_text_message(api, device, null_key, all_keys, group_id, add=False,clear=True,Time=0, retries=3, delay=5)
             del(removed_devices)
 
 ## Need to add a break here to clear old devices before continuting           
@@ -439,12 +551,16 @@ def main():
                 
                 if device['id'] in new_devices:
                     logging.info(f"New device ID: {vehicle_to_update} found. Adding all keys to whitelist.")
-                    send_text_message(api, vehicle_to_update, all_keys, add=True,clear=False,Time=0.02,retries=3, delay=5)
+                    send_text_message(api, vehicle_to_update, all_keys, group_id, conn, add=True,clear=False,Time=0.01,retries=3, delay=9)
                 else:
-                    if new_keys:
-                        send_text_message(api, vehicle_to_update, new_keys, add=True,clear=False,Time=0.01,retries=3, delay=5)
                     if remove_keys:
-                        send_text_message(api, vehicle_to_update, remove_keys, add=False,clear=False,Time=0.01,retries=3, delay=5)
+                        send_text_message(api, vehicle_to_update, remove_keys, group_id, conn, add=False,clear=False,Time=0.00,retries=3, delay=6)
+                    if new_keys:
+                        send_text_message(api, vehicle_to_update, new_keys, group_id, conn, add=True,clear=False,Time=0.00,retries=3, delay=6)
+                    retry_keys = search_failed(conn, group_id, vehicle_to_update)
+                    if retry_keys:
+                        send_text_message(api, vehicle_to_update, retry_keys,  group_id, conn, add=True,clear=False,Time=0.01,retries=3, delay=9)
+
         
         conn.close()
   
