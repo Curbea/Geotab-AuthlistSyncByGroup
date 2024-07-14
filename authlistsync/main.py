@@ -721,6 +721,23 @@ def search_failed(conn, group_id, column):
 
 
 
+def search_texts(api, group_id):
+    try:
+        texts = api.get('TextMessage', search={
+            "contentTypes": ["DriverAuthList"],
+            "latestMessageOnly": True,
+            "IsDelivered": False,
+            "deviceSearch": {
+                "groups": [{"id": group_id}]
+            }
+        })
+
+#To do
+#Either pipe output straight into calls or just edit database and do it on next run
+    
+    except Exception as e:
+        logging.error(f"Error in main process: {e}")
+
 
 def process_group(api, group, conn, exception_keys):
     """
