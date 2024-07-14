@@ -738,7 +738,7 @@ def search_texts(api, group_id):
     except Exception as e:
         logging.error(f"Error in main process: {e}")
 
-
+        
 def process_group(api, group, conn, exception_keys):
     """
     Process a group to fetch NFC keys and update vehicle information.
