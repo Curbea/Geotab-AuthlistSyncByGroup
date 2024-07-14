@@ -614,32 +614,39 @@ def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True, cl
 
     Raises:
     MyGeotabException: Custom exception with error details if any issues occur during the process.
-    raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]}) from e
+    """
     try:
+        calls = []
         for key in Keys:
             data = {
-
-    "device": {
-        "id": vehicle_to_update
-    },
-    "isDirectionToVehicle": True,
-    "messageContent": {
-        "driverKey": key,
-        "contentType": "DriverAuthList",
-        "clearAuthList": clear,
-        "addToAuthList": add
-    }
-}
+            "device": {
+            "id": vehicle_to_update
+            },
+            "isDirectionToVehicle": True,
+            "messageContent": {
+            "driverKey": key,
+            "contentType": "DriverAuthList",
+            "clearAuthList": clear,
+            "addToAuthList": add
+                }
+            }
+            calls.append(['Add', {"typeName": 'TextMessage', "entity": data}])  
+            
+        if calls:
             for attempt in range(retries):
                 try:
-                    if key:
-                        api.add("TextMessage",data)
-                        action = "added to" if add else "removed from"
-                        logging.debug(f"Keys {action} device {vehicle_to_update} Key: {key}")
-                        sleep(Time)
+                    if len(calls) <= 50:
+                        api.multi_call(calls)
+                    else:
+                        # Split into batches of 20
+                        for i in range(0, len(calls), 50):
+                            api.multi_call(calls[i:i + 50])
+                    action = "added to" if add else "removed from"
+                    logging.debug(f"Keys {action} device {vehicle_to_update} Keys: {Keys}")
+                    sleep(Time)
                     break  # If successful, break out of the retry loop
                 except Exception as e:
-                    logging.error(f"Unexpected error while sending text message to vehicle with ID: {vehicle_to_update} on attempt {attempt + 1}: {e}")
+                    logging.error(f"Unexpected error while sending text messages to vehicle with ID: {vehicle_to_update} on attempt {attempt + 1}: {e}")
                     if attempt < retries - 1:
                         logging.info(f"Retrying in {delay} seconds...")
                         sleep(delay)
@@ -647,13 +654,13 @@ def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True, cl
                         logging.error(f"Failed after {retries} attempts")
                         raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
             if add:
-                update_device_column(conn, group_id, key['serialNumber'], vehicle_to_update, 1)
-##For Vehicles were removing or updating; should have been sent a null array so we need to call it outside of the for loop. 
+                for key in Keys:
+                    update_device_column(conn, group_id, key['serialNumber'], vehicle_to_update, 1)
+        
         if clear:
             try:
-                api.add("TextMessage",data)
+                api.add("TextMessage", data)
                 logging.info(f"All Keys removed from vehicle with ID: {vehicle_to_update}")
-#More logging         
             except Exception as e:
                 logging.error(f"Unexpected error while clearing all keys from vehicle with ID: {vehicle_to_update}: {e}")
                 raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
