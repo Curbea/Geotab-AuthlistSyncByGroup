@@ -43,11 +43,11 @@ This script is designed to manage and synchronize NFC keys for drivers across va
 
 **Geotab_Groups** is the name of each group
 
-Id's can be found easily from geotab; you can find them by looking at the url when viewing the groups in geotab, it is a block of three or four digits at the end of the url.
+Id's can be found easily from mygeotab webui; you can find them by looking at the url when viewing, it is a block of three or four digits at the end of the url.
 
-For each Geotab_Groups listed to set timezones if enabled, for each create a new line in the .env file with the group's name = 
-the timezone to update to  e.g.
+For each Geotab_Groups listed, to set timezones if enabled, create a new line in the .env file with the group's name = the timezone to update to  e.g.
 Group Vancouver=America/Vancouver
+
 Check geotab to see availible timezone options
 
 3. **Launch**:
