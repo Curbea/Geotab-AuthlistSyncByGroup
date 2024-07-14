@@ -614,7 +614,7 @@ def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True, cl
 
     Raises:
     MyGeotabException: Custom exception with error details if any issues occur during the process.
-    """
+    raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]}) from e
     try:
         for key in Keys:
             data = {
