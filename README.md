@@ -26,28 +26,27 @@ This script is designed to manage and synchronize NFC keys for drivers across va
    pip install mygeotab python-dotenv
 
 2. **Edit .env**
-| Environment Parameters               | Notes                                                                                 |
-|--------------------------------------|---------------------------------------------------------------------------------------|
-| GEOTAB_USERNAME=your_username        |                                                                                       |
-| GEOTAB_PASSWORD=your_password        |                                                                                       |
-| GEOTAB_DATABASE=your_database        |                                                                                       |
-| GEOTAB_GROUPS=group1,group2,group3   | Geotab_Groups is the name of each group                                               |
-| PATCH_USERS=False                    |                                                                                       |
-| PATCH_ASSETS=False                   |                                                                                       |
-| PATCH_TZ=False                       |                                                                                       |
-| PATCH_SC=False                       |                                                                                       |
-| NEW_SC_ID=new_security_group_id      |                                                                                       |
-| OLD_SC_ID=old_security_group_id, old_security_group_id2 |                                                                    |
-| EXCEPTION_GROUP_ID=exception_group_id|                                                                                       |
-| **Group Timezone=** timezone         | For each Geotab_Groups above create a line in the .env file with the group's name = and the timezone to update to e.g. |
-| Group Vancouver=America/Vancouver    | Check Geotab to see available timezone options                                        |
 
+|  ENV Parameters                       |
+|---------------------------------------|
+| GEOTAB_USERNAME=your_username         |
+| GEOTAB_PASSWORD=your_password         |
+| GEOTAB_DATABASE=your_database         |
+| GEOTAB_GROUPS=group1,group2,group3    |
+| PATCH_USERS=False                     |
+| PATCH_ASSETS=False                    |
+| PATCH_TZ=False                        |
+| PATCH_SC=False                        |
+| NEW_SC_ID=new_security_group_id       |
+| OLD_SC_ID=old_security_group_id, old_security_group_id2       |
+| EXCEPTION_GROUP_ID=exception_group_id |
 
+**Geotab_Groups** is the name of each group
 
-Id's can be found easily from geotab; you can find them by looking at the url when viewing the groups, it is a block three or four digits at the end of the url.
+Id's can be found easily from geotab; you can find them by looking at the url when viewing the groups in geotab, it is a block of three or four digits at the end of the url.
 
-For each Geotab_Groups listed, if you are looking to set timezones, create a line in the .env file with the group's name = and the timezone to update to e.g.
-
+For each Geotab_Groups listed to set timezones if enabled, for each create a new line in the .env file with the group's name = 
+the timezone to update to  e.g.
 Group Vancouver=America/Vancouver
 Check geotab to see availible timezone options
 
