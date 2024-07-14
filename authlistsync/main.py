@@ -464,7 +464,7 @@ def modify_users(api, users, conn, all_userid, group_id, group_name):
 #Geotab uses text messages to communicate to the iox reader instructions to either remove or add with the addtowhitelist part. 
 
 #def send_text_message(api, vehicle_to_update, all_keys, add=True):
-def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True,clear=False,Time=0, retries=3, delay=5):
+def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True, clear=False, Time=0, retries=3, delay=5):
     try:
         for key in Keys:
             data = {
@@ -486,8 +486,6 @@ def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True,cle
                         api.add("TextMessage",data)
                         action = "added to" if add else "removed from"
                         logging.debug(f"Keys {action} device {vehicle_to_update} Key: {key}")
-                        if add:
-                            update_device_column(conn, group_id, key['serialNumber'], vehicle_to_update, 1)
                         sleep(Time)
                     break  # If successful, break out of the retry loop
                 except Exception as e:
@@ -498,6 +496,8 @@ def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True,cle
                     else:
                         logging.error(f"Failed after {retries} attempts")
                         raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
+            if add:
+                update_device_column(conn, group_id, key['serialNumber'], vehicle_to_update, 1)
 ##For Vehicles were removing or updating; should have been sent a null array so we need to call it outside of the for loop. 
         if clear:
             try:
