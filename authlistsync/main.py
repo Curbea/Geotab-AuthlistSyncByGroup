@@ -510,6 +510,28 @@ def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True,cle
     except Exception as e:
         logging.error(f"Unexpected error while processing keys for vehicle with ID: {vehicle_to_update}: {e}")
         raise MyGeotabException({"errors": [{"name": "UnexpectedError", "message": str(e)}]})
+
+
+def search_texts(api, group_id):
+    try:
+        texts = api.get('TextMessage', search={
+            "contentTypes": ["DriverAuthList"],
+            "latestMessageOnly": True,
+            "IsDelivered": False,
+            "deviceSearch": {
+                "groups": [{"id": group_id}]
+            }
+        })
+
+#To do
+#Either pipe output straight into calls or just edit database and do it on next run
+    
+    except Exception as e:
+        logging.error(f"Error in main process: {e}")
+
+
+
+
 #Back
 def process_group(api, group, conn, exception_keys):
     if conn:
