@@ -638,7 +638,7 @@ def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True, cl
                     if len(calls) <= 50:
                         api.multi_call(calls)
                     else:
-                        # Split into batches of 20
+                        # Split into batches of 50
                         for i in range(0, len(calls), 50):
                             api.multi_call(calls[i:i + 50])
                     action = "added to" if add else "removed from"
@@ -659,6 +659,8 @@ def send_text_message(api, vehicle_to_update, Keys, group_id, conn, add=True, cl
         
         if clear:
             try:
+                key = None
+                #Can't iterate over null and call fails with clearauthlist = true even with an empty array, needs specifically to be null
                 api.add("TextMessage", data)
                 logging.info(f"All Keys removed from vehicle with ID: {vehicle_to_update}")
             except Exception as e:
@@ -755,9 +757,9 @@ def process_group(api, group, conn, exception_keys):
 
     Returns:
     tuple: A tuple containing the following elements:
-        - new_keys (list): List of new keys inserted into the database.
-        - remove_keys (list): List of keys removed from the database.
-        - all_keys (list): List of all processed keys.
+        - new_keys (list): List of new keys inserted into the database for a given group.
+        - remove_keys (list): List of keys removed from the database for a given group.
+        - all_keys (list): List of all processed keys in a given group.
         - group_id (str): The ID of the processed group.
         - group_name (str): The name of the processed group.
         - filtered_devices (list): List of devices after processing.
